@@ -5,19 +5,16 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 
 dotenv.config();
-console.log(process.env.REDIS_PASSWORD)
 
-const url = '';
 const redisClient = createClient({
-    url,
-    password: ''
+    url: `redis://${process.env.REDIS_USERNAME}:${process.env.REDIS_PASSWORD}@r${process.env.REDIS_HOSTNAME}:${process.env.REDIS_PORT}`
 });
+
 redisClient.on('error', (err) => console.log('Redis Client Error', err));
 
-const HOSTNAME = '127.0.0.1';
 const PORT = 3001;
 const app = express();
-const allowedOrigins = ['http://localhost:3000'];
+const allowedOrigins = ['http://localhost:3000', 'https://visionary-narwhal-25c249.netlify.app'];
 
 app.use(cors({
     origin: function(origin, callback){
