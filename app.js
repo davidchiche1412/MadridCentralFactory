@@ -7,14 +7,14 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const redisClient = createClient({
-    url: `redis://${process.env.REDIS_USERNAME}:${process.env.REDIS_PASSWORD}@r${process.env.REDIS_HOSTNAME}:${process.env.REDIS_PORT}`
+    url: `redis://${process.env.REDIS_USERNAME}:${process.env.REDIS_PASSWORD}@${process.env.REDIS_HOSTNAME}:${process.env.REDIS_PORT}`
 });
 
 redisClient.on('error', (err) => console.log('Redis Client Error', err));
 
 const PORT = 3001;
 const app = express();
-const allowedOrigins = ['http://localhost:3000', 'https://visionary-narwhal-25c249.netlify.app'];
+const allowedOrigins = ['https://visionary-narwhal-25c249.netlify.app', 'madridcentral.org', 'https://madridcentral.org'];
 
 app.use(cors({
     origin: function(origin, callback){
