@@ -1,5 +1,4 @@
 import express from "express";
-import bodyParser from "body-parser";
 import { createClient } from 'redis';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -11,17 +10,17 @@ const redisClient = createClient({
 });
 
 redisClient.on('error', (err) => console.log('Redis Client Error', err));
+await redisClient.connect();
 
 const PORT = 3001;
 const app = express();
-const allowedOrigins = ['https://visionary-narwhal-25c249.netlify.app', 'madridcentral.org', 'https://madridcentral.org'];
+const allowedOrigins = ['https://visionary-narwhal-25c249.netlify.app', 'https://madridcentral.org'];
 
 app.use(cors({
     origin: function(origin, callback){
-      // allow requests with no origin (eg: mobile)
       if(!origin) return callback(null, true);
       if(allowedOrigins.indexOf(origin) === -1){
-        var msg = 'The CORS policy for this site does not ' +
+        const msg = 'The CORS policy for this site does not ' +
                   'allow access from the specified Origin.';
         return callback(new Error(msg), false);
       }
@@ -30,69 +29,67 @@ app.use(cors({
   }));
 
 
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({extended:true}));
+app.use(express.json());
+app.use(express.urlencoded({extended:true}));
 
 app.get('/', async (request, response) => {
 
     try {
-        const parsed_adrress = formatAddress(request.query.address)
-        console.log("INFO: checking if " + parsed_adrress + " exists in DB...");
+        if (!request.query.address || typeof request.query.address !== 'string') {
+            return response.status(400).send("Missing address parameter");
+        }
 
-        await redisClient.connect();
-        const value = await redisClient.json.get(parsed_adrress);
+        const parsed_address = formatAddress(request.query.address)
+        console.log("INFO: checking if " + parsed_address + " exists in DB...");
+
+        const value = await redisClient.json.get(parsed_address);
         if(value){
             console.log("INFO: value found on DB, returning... ", value);
-            response.statusCode = 200;
-            response.send(value);
+            response.status(200).json(value);
         }else{
             console.log("INFO: NOT value found on DB");
-            response.statusCode = 404;
-            response.send("Not found");
+            response.status(404).send("Not found");
         }
 
     }catch (error){
         console.log("ERROR: " + error);
-        response.statusCode = 500;
-        response.send("Something went wrong");
+        response.status(500).send("Something went wrong");
     }
-    await redisClient.quit();
 
 });
 
 app.post('/', async (request, response) => {
     try {
-        let lat = request.body.lat
-        let long = request.body.long
-        let address = request.body.address
-        let inside = request.body.inside
+        const { lat, long, address, inside } = request.body;
 
-        const parsed_adrress = formatAddress(address)
-
-        console.log("INFO: setting  " + parsed_adrress + " in DB...")
-
-        await redisClient.connect();
-
-        const existing = await redisClient.json.get(parsed_adrress);
-
-        if (existing && (existing.lat == null || existing.long == null) && lat != null && long != null) {
-            console.log("INFO: updating " + parsed_adrress + " with missing lat/long...")
-            await redisClient.json.set(parsed_adrress, '.', {lat: lat, long: long, inside: existing.inside});
-        } else if (!existing) {
-            await redisClient.json.set(parsed_adrress, '.', {lat: lat, long: long, inside: inside});
+        if (!address || typeof address !== 'string') {
+            return response.status(400).send("Missing address");
+        }
+        if (typeof inside !== 'boolean') {
+            return response.status(400).send("Missing or invalid 'inside' field");
         }
 
-        console.log("INFO: " + parsed_adrress + " setted SUCCESSFULLY!")
+        const parsed_address = formatAddress(address)
 
-        response.statusCode = 200;
-        response.send("OK");
+        console.log("INFO: setting  " + parsed_address + " in DB...")
+
+        const existing = await redisClient.json.get(parsed_address);
+
+        if (existing && (existing.lat == null || existing.long == null) && lat != null && long != null) {
+            console.log("INFO: updating " + parsed_address + " with missing lat/long...")
+            await redisClient.json.set(parsed_address, '.', {lat: Number(lat), long: Number(long), inside: existing.inside});
+        } else if (!existing) {
+            await redisClient.json.set(parsed_address, '.', {lat: Number(lat), long: Number(long), inside: inside});
+        }
+
+        console.log("INFO: " + parsed_address + " setted SUCCESSFULLY!")
+
+        response.status(200).send("OK");
 
     } catch (error) {
         console.log("ERROR: " + error)
-        response.statusCode = 400;
-        response.send(error);
-    }  
-    await redisClient.quit();
+        response.status(400).send("Bad request");
+    }
 });
 
 
@@ -110,17 +107,9 @@ function formatAddress(address){
         'pº': 'paseo'
       }
     
-    address = address.replace(/[.,]/g, '').toLowerCase().trim()
+    address = String(address).replace(/<[^>]*>/g, '').replace(/[.,]/g, '').toLowerCase().trim().slice(0, 200)
 
-    let formatted_address = []
-    address.split(' ').forEach(function(word) {
-        if(replaceWords[word]) {
-            formatted_address.push(replaceWords[word])
-            return
-        }
-        formatted_address.push(word)
-    })
-    return formatted_address.join(' ')
+    return address.split(' ').map(word => replaceWords[word] || word).join(' ')
 
 }
 
