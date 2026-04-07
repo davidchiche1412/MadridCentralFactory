@@ -73,7 +73,15 @@ app.post('/', async (request, response) => {
 
         await redisClient.connect();
 
-        const value = await redisClient.json.set(parsed_adrress, '.', {lat: lat, long:long, inside: inside});
+        const existing = await redisClient.json.get(parsed_adrress);
+
+        if (existing && (existing.lat == null || existing.long == null) && lat != null && long != null) {
+            console.log("INFO: updating " + parsed_adrress + " with missing lat/long...")
+            await redisClient.json.set(parsed_adrress, '.', {lat: lat, long: long, inside: existing.inside});
+        } else if (!existing) {
+            await redisClient.json.set(parsed_adrress, '.', {lat: lat, long: long, inside: inside});
+        }
+
         console.log("INFO: " + parsed_adrress + " setted SUCCESSFULLY!")
 
         response.statusCode = 200;
