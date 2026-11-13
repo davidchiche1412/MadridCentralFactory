@@ -64,6 +64,7 @@ const ABBREVIATIONS = {
 
 export function formatAddress(address) {
   return address
+    .replace(/<[^>]*>/g, '')
     .replace(/[.,]/g, '')
     .toLowerCase()
     .trim()
@@ -130,8 +131,12 @@ app.post('/', async (request, response) => {
   }
 
   const inside = isInsideMadridCentral(lat, long);
-  // NX: la primera geocodificación gana; un cliente no puede sobrescribir una entrada existente.
-  await redis.json.set(KEY_PREFIX + address, '$', { lat, long, inside }, { condition: 'NX' });
+  const key = KEY_PREFIX + address;
+  const existing = await redis.json.get(key);
+  // Solo se escribe si no existe o si faltaban las coordenadas; una entrada completa no se sobrescribe.
+  if (!existing || existing.lat == null || existing.long == null) {
+    await redis.json.set(key, '$', { lat, long, inside });
+  }
   response.json({ inside });
 });
 
