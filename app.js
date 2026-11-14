@@ -85,12 +85,28 @@ function parseCoordinate(value, min, max) {
     : null;
 }
 
-const redis = createClient({
-  socket: { host: process.env.REDIS_HOSTNAME, port: Number(process.env.REDIS_PORT) },
-  username: process.env.REDIS_USERNAME,
-  password: process.env.REDIS_PASSWORD,
-});
+// REDIS_URL (redis:// o rediss://) tiene prioridad; si no, se usan las variables sueltas.
+// REDIS_TLS=true activa TLS cuando se usan las variables sueltas.
+const redis = createClient(
+  process.env.REDIS_URL
+    ? { url: process.env.REDIS_URL }
+    : {
+        socket: {
+          host: process.env.REDIS_HOSTNAME,
+          port: Number(process.env.REDIS_PORT),
+          tls: process.env.REDIS_TLS === 'true',
+        },
+        username: process.env.REDIS_USERNAME,
+        password: process.env.REDIS_PASSWORD,
+      },
+);
 redis.on('error', (error) => console.error('Redis error:', error.message));
+
+// Las rutas que usan la caché devuelven 503 en vez de colgarse si Redis no está listo.
+const requireRedis = (_request, response, next) => {
+  if (redis.isReady) return next();
+  response.status(503).json({ error: 'Caché no disponible.' });
+};
 
 const app = express();
 app.disable('x-powered-by');
@@ -109,11 +125,13 @@ app.use(
 app.use(express.json({ limit: '2kb' }));
 app.use(rateLimit({ windowMs: 60_000, limit: 60, standardHeaders: 'draft-8', legacyHeaders: false }));
 
+// Liveness: siempre 200 mientras el proceso responda. Si fuera 503 con Redis caído, Fly sacaría
+// la máquina del balanceo (PR04) y el front no podría ni recurrir a Google.
 app.get('/health', (_request, response) => {
-  response.status(redis.isReady ? 200 : 503).json({ status: redis.isReady ? 'ok' : 'redis-unavailable' });
+  response.json({ status: 'ok', redis: redis.isReady ? 'up' : 'down' });
 });
 
-app.get('/', async (request, response) => {
+app.get('/', requireRedis, async (request, response) => {
   const address = parseAddress(request.query.address);
   if (!address) return response.status(400).json({ error: 'Dirección no válida.' });
 
@@ -122,7 +140,7 @@ app.get('/', async (request, response) => {
   response.json(value);
 });
 
-app.post('/', async (request, response) => {
+app.post('/', requireRedis, async (request, response) => {
   const address = parseAddress(request.body?.address);
   const lat = parseCoordinate(request.body?.lat, -90, 90);
   const long = parseCoordinate(request.body?.long, -180, 180);
@@ -146,12 +164,16 @@ app.use((_request, response) => {
 
 // Express 5 envía aquí los errores de handlers async; no se devuelve el detalle al cliente.
 app.use((error, _request, response, _next) => {
+  if (error.type === 'entity.parse.failed' || error.type === 'entity.too.large') {
+    return response.status(400).json({ error: 'Cuerpo no válido.' });
+  }
   console.error('Error:', error);
   response.status(500).json({ error: 'Error interno.' });
 });
 
-await redis.connect();
 const server = app.listen(PORT, () => console.log(`Servidor escuchando en ${PORT}`));
+// Conexión en segundo plano: el puerto ya está abierto y node-redis reintenta solo.
+redis.connect().catch((error) => console.error('Redis connect error:', error.message));
 
 function shutdown() {
   server.close(async () => {
