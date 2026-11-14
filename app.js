@@ -87,7 +87,8 @@ function parseCoordinate(value, min, max) {
 
 // REDIS_URL (redis:// o rediss://) tiene prioridad; si no, se usan las variables sueltas.
 // REDIS_TLS=true activa TLS cuando se usan las variables sueltas.
-const redis = createClient(
+// RESP2: este Redis (redislabs) no soporta el comando HELLO que node-redis 6 usa por defecto (RESP3).
+const redis = createClient({ RESP: 2, ...(
   process.env.REDIS_URL
     ? { url: process.env.REDIS_URL }
     : {
@@ -98,8 +99,8 @@ const redis = createClient(
         },
         username: process.env.REDIS_USERNAME,
         password: process.env.REDIS_PASSWORD,
-      },
-);
+      }),
+});
 redis.on('error', (error) => console.error('Redis error:', error.message));
 
 // Las rutas que usan la caché devuelven 503 en vez de colgarse si Redis no está listo.
